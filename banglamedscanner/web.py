@@ -115,3 +115,30 @@ def research_endpoint(body: ResearchRequest):
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except (OSError, sqlite3.Error) as exc:
         raise HTTPException(status_code=503, detail='Research data source unavailable') from exc
+
+# Batch 16: sourced evidence pipeline (development split only).
+from .evidence import analyze as run_evidence
+from .llm_report import LLMMissingConfiguration, LLMResponseError, is_configured
+
+class EvidenceRequest(BaseModel):
+    question: str = Field(min_length=2, max_length=500)
+    limit: int = Field(default=3, ge=1, le=5)
+    ai_summary: bool = False
+
+@app.get('/api/ai/status')
+def ai_status():
+    return {'configured': is_configured(), 'provider': 'OpenAI-compatible external API',
+            'clinical_validation': False}
+
+@app.post('/api/evidence')
+def evidence_endpoint(body: EvidenceRequest):
+    try:
+        return run_evidence(body.question, limit=body.limit, ai_summary=body.ai_summary)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except LLMMissingConfiguration:
+        raise HTTPException(status_code=503, detail='AI Bangla summary is not configured') from None
+    except LLMResponseError:
+        raise HTTPException(status_code=502, detail='AI report unavailable or invalid') from None
+    except (OSError, sqlite3.Error):
+        raise HTTPException(status_code=503, detail='Research data source unavailable') from None

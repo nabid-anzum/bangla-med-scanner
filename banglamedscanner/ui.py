@@ -42,3 +42,6 @@ form.addEventListener('submit',async e=>{
  }catch(err){status.textContent='ত্রুটি: '+err.message}finally{run.disabled=false}
 });
 </script></body></html>'''
+
+from .ui_evidence import enhance as _enhance_evidence
+PAGE = _enhance_evidence(PAGE)
