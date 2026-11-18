@@ -1,0 +1,31 @@
+{
+  "title": "BanglaMedScanner pilot corpus",
+  "retrieved_at_utc": "2026-11-18T20:54:43.562782+00:00",
+  "source": "NCBI PubMed E-utilities ESearch and EFetch",
+  "date_range": [
+    "2021-01-01",
+    "2026-11-18"
+  ],
+  "total_papers": 100,
+  "selection": "20 English-language abstracts per clinical topic; relevance-ranked search",
+  "topics": {
+    "diabetes": 20,
+    "hypertension": 20,
+    "asthma": 20,
+    "depression": 20,
+    "copd": 20
+  },
+  "splits": {
+    "development": 80,
+    "evaluation_candidate": 20
+  },
+  "pmid_list_sha256": "0e91bde6231b95639468edd329f4d35ffff8ccabf3d6b222dbf6e81cc6e79f38",
+  "queries": {
+    "diabetes": "(\"Diabetes Mellitus, Type 2\"[MeSH Terms] OR \"type 2 diabetes\"[Title/Abstract]) AND english[Language] AND hasabstract AND \"Humans\"[MeSH Terms] AND (\"Randomized Controlled Trial\"[Publication Type] OR \"Meta-Analysis\"[Publication Type] OR \"Systematic Review\"[Publication Type]) AND (\"2021/01/01\"[Date - Publication] : \"2026-11-18\"[Date - Publication]) ",
+    "hypertension": "(\"Hypertension\"[MeSH Terms] OR hypertension[Title/Abstract]) AND english[Language] AND hasabstract AND \"Humans\"[MeSH Terms] AND (\"Randomized Controlled Trial\"[Publication Type] OR \"Meta-Analysis\"[Publication Type] OR \"Systematic Review\"[Publication Type]) AND (\"2021/01/01\"[Date - Publication] : \"2026-11-18\"[Date - Publication]) ",
+    "asthma": "(\"Asthma\"[MeSH Terms] OR asthma[Title/Abstract]) AND english[Language] AND hasabstract AND \"Humans\"[MeSH Terms] AND (\"Randomized Controlled Trial\"[Publication Type] OR \"Meta-Analysis\"[Publication Type] OR \"Systematic Review\"[Publication Type]) AND (\"2021/01/01\"[Date - Publication] : \"2026-11-18\"[Date - Publication]) ",
+    "depression": "(\"Depressive Disorder\"[MeSH Terms] OR depression[Title/Abstract]) AND english[Language] AND hasabstract AND \"Humans\"[MeSH Terms] AND (\"Randomized Controlled Trial\"[Publication Type] OR \"Meta-Analysis\"[Publication Type] OR \"Systematic Review\"[Publication Type]) AND (\"2021/01/01\"[Date - Publication] : \"2026-11-18\"[Date - Publication]) ",
+    "copd": "(\"Pulmonary Disease, Chronic Obstructive\"[MeSH Terms] OR COPD[Title/Abstract]) AND english[Language] AND hasabstract AND \"Humans\"[MeSH Terms] AND (\"Randomized Controlled Trial\"[Publication Type] OR \"Meta-Analysis\"[Publication Type] OR \"Systematic Review\"[Publication Type]) AND (\"2021/01/01\"[Date - Publication] : \"2026-11-18\"[Date - Publication]) "
+  },
+  "warning": "Evaluation candidates are NOT manually verified gold labels. Abstracts are not redistributed in this manifest."
+}
