@@ -97,6 +97,7 @@ from pydantic import BaseModel, Field
 from typing import Literal
 from .research import research as run_research
 from .ui import PAGE
+from .ui_unified import PAGE as UNIFIED_PAGE
 
 class ResearchRequest(BaseModel):
     question: str = Field(min_length=2, max_length=500)
@@ -105,7 +106,7 @@ class ResearchRequest(BaseModel):
 
 @app.get('/', response_class=HTMLResponse)
 def home():
-    return HTMLResponse(PAGE, headers={'Cache-Control':'no-store'})
+    return HTMLResponse(UNIFIED_PAGE, headers={'Cache-Control':'no-store'})
 
 @app.post('/api/research')
 def research_endpoint(body: ResearchRequest):
@@ -188,7 +189,7 @@ class StructuredRequest(StructuredBaseModel):
 
 @app.get('/structured', response_class=StructuredHTMLResponse)
 def structured_home():
-    return StructuredHTMLResponse(STRUCTURED_PAGE, headers={'Cache-Control': 'no-store'})
+    return StructuredHTMLResponse(UNIFIED_PAGE, headers={'Cache-Control': 'no-store'})
 
 @app.post('/api/structured')
 def structured_endpoint(body: StructuredRequest):
@@ -215,7 +216,7 @@ class WorkflowRequest(WorkflowModel):
 
 @app.get('/workflow', response_class=WorkflowHTML)
 def workflow_home():
-    return WorkflowHTML(WORKFLOW_PAGE, headers={'Cache-Control': 'no-store'})
+    return WorkflowHTML(UNIFIED_PAGE, headers={'Cache-Control': 'no-store'})
 
 @app.post('/api/orchestrate')
 def workflow_endpoint(body: WorkflowRequest):
