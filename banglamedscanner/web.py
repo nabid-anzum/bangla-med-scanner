@@ -229,3 +229,75 @@ def workflow_endpoint(body: WorkflowRequest):
         raise HTTPException(status_code=422, detail=str(exc)) from None
     except (ProvenanceError, OSError, workflow_sqlite3.Error):
         raise HTTPException(status_code=503, detail='Verified research source unavailable') from None
+# Batch 25: open medical topics and authenticated DeepSeek research agents.
+# The original /api/orchestrate and /api/ai/jobs endpoints remain unchanged.
+from fastapi import Header, HTTPException
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel as OpenModel, Field as OpenField, ConfigDict as OpenConfig
+from .open_topics import public_live_search, plan_public
+from .ai_orchestration import run_ai_research
+from .ai_gate import authorized as bms25_authorized, start_job as bms25_start_job
+from .ai_gate import get_job as bms25_get_job, JobBusy as BMS25Busy, JobLimit as BMS25Limit
+from .llm_report import is_configured as bms25_model_ready
+from .orchestrator import orchestrate as bms25_fixed_orchestrate, OrchestrationBusy as BMS25ResearchBusy
+
+class OpenTopicRequest(OpenModel):
+    model_config = OpenConfig(extra='forbid')
+    question: str = OpenField(min_length=2, max_length=500)
+    limit: int = OpenField(default=3, ge=1, le=5)
+
+@app.post('/api/open-search')
+def bms25_open_search(body: OpenTopicRequest):
+    try:
+        return JSONResponse(public_live_search(body.question, limit=body.limit),
+                            headers={'Cache-Control': 'no-store'})
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    except Exception:
+        raise HTTPException(status_code=503, detail='Live PubMed search unavailable') from None
+
+@app.post('/api/smart-search')
+def bms25_smart_search(body: OpenTopicRequest):
+    try:
+        planned = plan_public(body.question)
+        if planned['local_corpus_supported']:
+            result = bms25_fixed_orchestrate(body.question, limit=min(body.limit, 3))
+            result['source'] = 'corpus'
+        else:
+            result = public_live_search(body.question, limit=body.limit)
+        return JSONResponse(result, headers={'Cache-Control': 'no-store'})
+    except BMS25ResearchBusy:
+        raise HTTPException(status_code=429, detail='Research concurrency limit reached') from None
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    except Exception:
+        raise HTTPException(status_code=503, detail='Research source unavailable') from None
+
+@app.post('/api/ai/research/jobs', status_code=202)
+def bms25_start_ai_research(body: OpenTopicRequest,
+                            ai_access: str | None = Header(default=None, alias='X-BMS-AI-Token')):
+    if not bms25_authorized(ai_access):
+        raise HTTPException(status_code=403, detail='Administrator token required')
+    if not bms25_model_ready():
+        raise HTTPException(status_code=503, detail='Local DeepSeek unavailable')
+    try:
+        job_id = bms25_start_job(body.question, min(body.limit, 2), run_ai_research)
+    except BMS25Busy:
+        raise HTTPException(status_code=429, detail='Another local AI job is active') from None
+    except BMS25Limit:
+        raise HTTPException(status_code=429, detail='Hourly model job limit reached') from None
+    return {'job_id': job_id, 'status': 'running',
+            'model': 'local DeepSeek-R1-Distill-Qwen-1.5B',
+            'note': 'Three sequential model calls; results require human review'}
+
+@app.get('/api/ai/research/jobs/{job_id}')
+def bms25_poll_ai_research(job_id: str,
+                           ai_access: str | None = Header(default=None, alias='X-BMS-AI-Token')):
+    if not bms25_authorized(ai_access):
+        raise HTTPException(status_code=403, detail='Administrator token required')
+    if len(job_id) > 64:
+        raise HTTPException(status_code=404, detail='Job not found')
+    value = bms25_get_job(job_id)
+    if value is None:
+        raise HTTPException(status_code=404, detail='Job not found or expired')
+    return JSONResponse(value, headers={'Cache-Control': 'no-store'})

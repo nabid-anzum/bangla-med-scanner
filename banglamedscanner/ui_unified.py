@@ -214,8 +214,9 @@ footer a{color:#5a7a68}
         <div class="source-control">
           <label for="source">Research source</label>
           <select id="source" name="source">
-            <option value="corpus">Verified local research corpus</option>
-            <option value="live">Live PubMed · article metadata only</option>
+            <option value="auto" selected>Automatic · any medical topic</option>
+            <option value="corpus">Local 5-topic development corpus</option>
+            <option value="live">Live PubMed · any English topic / common Bangla terms</option>
           </select>
         </div>
         <button id="search-submit" class="primary" type="submit">
@@ -249,7 +250,7 @@ footer a{color:#5a7a68}
 <script>
 (()=>{'use strict';
   const $=id=>document.getElementById(id);
-  const state={data:null,kind:'corpus',tab:'overview',busy:false,aiReport:null};
+  const state={data:null,kind:'corpus',tab:'overview',busy:false,aiReport:null,aiAgentReport:null};
   const labels={population:'Population',intervention:'Intervention',comparator:'Comparator',outcome:'Outcome',result:'Reported result'};
   const viewParam=new URLSearchParams(location.search).get('view');
   const requestedTab=location.pathname==='/structured'?'pico':location.pathname==='/workflow'?'trace':viewParam;
@@ -326,6 +327,19 @@ footer a{color:#5a7a68}
       if(state.aiReport){result.textContent=state.aiReport;result.hidden=false;}
       go.addEventListener('click',()=>runAI(data.question_bn,input,go,progress,result));
     }
+    const box=append(root,'details',undefined,'admin-card');
+    box.open=true;
+    append(box,'summary','AI multi-agent research · DeepSeek (administrator only)');
+    append(box,'p','Unlike the public six-stage rule-based search, this flow really invokes DeepSeek for query planning, PICO candidate interpretation and Bangla synthesis (3 sequential calls). One active AI job; unlimited medical topics with English PubMed sources, subject to model translation quality and availability.','admin-desc');
+    const row=append(box,'div',undefined,'admin-controls');
+    const key=append(row,'input');key.type='password';key.placeholder='Private administrator token';
+    key.maxLength=256;key.autocomplete='off';key.spellcheck=false;
+    const go=append(row,'button','Run DeepSeek research agents','primary');go.type='button';
+    const progress=append(box,'p','','status');progress.setAttribute('role','status');
+    progress.setAttribute('aria-live','polite');
+    const result=append(box,'div',undefined,'ai-result');result.hidden=true;
+    if(state.aiAgentReport)paintAIResearch(result,state.aiAgentReport);
+    go.addEventListener('click',()=>runAgentAI(data.question_bn,key,go,progress,result));
     warning(root,'Research prototype · Source linkage and excerpts are mechanically checked; medical accuracy and clinical significance are not independently verified.');
   }
   function renderPico(root,data){
@@ -388,29 +402,79 @@ footer a{color:#5a7a68}
     if(!response.ok)throw new Error(typeof body.detail==='string'?body.detail:'The research service is unavailable.');
     return body;
   }
+  // Legacy '/api/research' with {source:'live'} is still available.
   async function submit(){
     if(state.busy)return;
     const question=$('question').value.trim(),kind=$('source').value;
     if(question.length<2||question.length>500){status('Enter a question between 2 and 500 characters.',true);return;}
-    state.busy=true;state.aiReport=null;state.data=null;state.kind=kind;
+    state.busy=true;state.aiReport=null;state.aiAgentReport=null;state.data=null;state.kind=kind==='corpus'?'corpus':'live';
     $('search-submit').disabled=true;$('results').hidden=true;
     status(kind==='corpus'?'Six research agents are retrieving and verifying evidence…':'Searching live PubMed metadata…');
     try{
-      const path=kind==='corpus'?'/api/orchestrate':'/api/research';
-      const payload=kind==='corpus'?{question,limit:3}:{question,source:'live',limit:5};
+      const path=kind==='corpus'?'/api/orchestrate':kind==='auto'?'/api/smart-search':'/api/open-search';
+      const payload=kind==='corpus'?{question,limit:3}:{question,limit:5};
       const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),28000);
       let response;
       try{response=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify(payload),signal:controller.signal,cache:'no-store'});}
       finally{clearTimeout(timeout);}
       const data=await readJSON(response);
-      if(kind==='corpus'&&(!Array.isArray(data.agent_trace)||data.agent_trace.length!==6||!Array.isArray(data.papers)))
+      if((kind==='corpus'||(kind==='auto'&&data.source==='corpus'))&&
+          (!Array.isArray(data.agent_trace)||data.agent_trace.length!==6||!Array.isArray(data.papers)))
         throw new Error('The research workflow returned incomplete evidence.');
-      if(kind==='live'&&!Array.isArray(data.papers))throw new Error('PubMed returned an unexpected response.');
+      if((kind==='live'||(kind==='auto'&&data.source!=='corpus'))&&
+          !Array.isArray(data.papers))throw new Error('PubMed returned an unexpected response.');
+      state.kind=kind==='auto'?(data.source==='corpus'?'corpus':'live'):(kind==='corpus'?'corpus':'live');
       state.data=data;renderResults();
-      status(kind==='corpus'?'Six agents completed. Explore the report using the tabs.':'PubMed search completed (metadata only).');
+      status(data.needs_ai_translation?'For less common Bangla medical terms, use the administrator DeepSeek research mode or enter English terms.':
+        state.kind==='corpus'?'Six software-agent stages completed; DeepSeek was not used.':'Live PubMed discovery completed; DeepSeek was not used.');
     }catch(err){status(err.name==='AbortError'?'The request timed out. Try again.':String(err.message||err),true);}
     finally{state.busy=false;$('search-submit').disabled=false;}
+  }
+  function paintAIResearch(root,data){
+    root.replaceChildren();root.hidden=false;
+    if(data.status==='no_abstract_evidence'){
+      append(root,'strong','No usable PubMed abstracts were retrieved. No AI medical conclusion was generated.');return;
+    }
+    append(root,'strong','DeepSeek actually ran '+String(data.model_invocations||0)+' times');
+    append(root,'p',String(data.ai_report?.summary_bn||'No validated Bangla summary.'),'report');
+    append(root,'p','Generated text is not clinically verified. Source quotations are checked mechanically.','note');
+    for(const p of (data.papers||[])){
+      const article=append(root,'article',undefined,'paper');paperHeader(article,p,0);
+      for(const ev of (p.evidence||[]))append(article,'blockquote',ev.quote_en,'excerpt');
+      const c=Object.entries(p.pico_ai_candidates||{});
+      for(const [key,value] of c)append(article,'p',key.toUpperCase()+': '+String(value.quote_en||'')+' (exact-quote candidate, unreviewed)','note');
+    }
+    append(root,'h4','Actual execution trace');
+    for(const stage of (data.agent_trace||[])){
+      append(root,'p',String(stage.agent)+': '+(stage.model_invoked?'DeepSeek model called':'Software step')+
+        ' · '+String(stage.elapsed_ms||0)+' ms','note');
+    }
+  }
+  async function runAgentAI(question,input,button,progress,result){
+    const token=input.value.trim();
+    if(!token){progress.textContent='Enter the private administrator token.';return;}
+    button.disabled=true;result.hidden=true;progress.textContent='Starting private DeepSeek multi-agent research…';
+    const headers={'Content-Type':'application/json','X-BMS-AI-Token':token};
+    try{
+      const start=await readJSON(await fetch('/api/ai/research/jobs',{
+        method:'POST',headers,body:JSON.stringify({question,limit:2}),cache:'no-store'}));
+      if(!/^[a-zA-Z0-9_-]{1,64}$/.test(String(start.job_id||'')))throw Error('Invalid job ID');
+      for(let attempt=0;attempt<195;attempt++){
+        await new Promise(resolve=>setTimeout(resolve,3000));
+        const job=await readJSON(await fetch('/api/ai/research/jobs/'+encodeURIComponent(start.job_id),{
+          headers:{'X-BMS-AI-Token':token},cache:'no-store'}));
+        if(job.status==='completed'){
+          state.aiAgentReport=job.result;
+          paintAIResearch(result,job.result);
+          progress.textContent='Model-based research finished. Independently review every finding.';return;
+        }
+        if(job.status==='failed')throw Error(job.detail||'Local AI job failed');
+        progress.textContent='Running DeepSeek sequentially on the CPU-limited model. This may take several minutes…';
+      }
+      throw Error('Timed out waiting for the local model. Research search remains available.');
+    }catch(err){progress.textContent=String(err.message||err);}
+    finally{button.disabled=false;input.value='';}
   }
   async function runAI(question,input,button,progress,result){
     const token=input.value.trim();
