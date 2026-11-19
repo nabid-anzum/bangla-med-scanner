@@ -73,6 +73,16 @@ def _response_schema(system):
             'required': ['candidates'],
             'additionalProperties': False,
         }
+    if 'claim evidence matcher' in system:
+        entry = {
+            'type': 'object', 'properties': {
+                'id': field, 'pmid': field,
+                'relation': {'type': 'string', 'enum': ['direct', 'related', 'contradicts', 'unclear']},
+            }, 'required': ['id', 'pmid', 'relation'], 'additionalProperties': False,
+        }
+        return {'type': 'object', 'properties': {
+            'matches': {'type': 'array', 'maxItems': 5, 'items': entry},
+        }, 'required': ['matches'], 'additionalProperties': False}
     if 'academic evidence explainer' in system:
         return {
             'type': 'object',
@@ -112,6 +122,8 @@ def _chat(system, prompt, *, max_tokens=240):
         budget = max(max_tokens, 440)
     elif 'PICO candidate extractor' in system:
         budget = max(max_tokens, 680)
+    elif 'claim evidence matcher' in system:
+        budget = max(max_tokens, 540)
     else:
         budget = max(max_tokens, 760)
 
@@ -177,6 +189,8 @@ def _chat(system, prompt, *, max_tokens=240):
                          isinstance(result.get('topic_en'), str))
             elif 'PICO candidate extractor' in system:
                 valid = isinstance(result.get('candidates'), list)
+            elif 'claim evidence matcher' in system:
+                valid = isinstance(result.get('matches'), list)
             else:
                 valid = (isinstance(result.get('summary_bn'), str) and
                          isinstance(result.get('paper_explanations'), list))

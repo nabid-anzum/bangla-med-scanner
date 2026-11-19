@@ -97,7 +97,7 @@ from pydantic import BaseModel, Field
 from typing import Literal
 from .research import research as run_research
 from .ui import PAGE
-from .ui_unified import PAGE as UNIFIED_PAGE
+from .ui_workspace29 import PAGE as UNIFIED_PAGE
 
 class ResearchRequest(BaseModel):
     question: str = Field(min_length=2, max_length=500)
@@ -301,3 +301,71 @@ def bms25_poll_ai_research(job_id: str,
     if value is None:
         raise HTTPException(status_code=404, detail='Job not found or expired')
     return JSONResponse(value, headers={'Cache-Control': 'no-store'})
+
+
+# Batch 29: single research report and administrator-only statement lookup.
+# Existing public/private endpoints and their authorization remain unchanged.
+from functools import partial as bms29_partial
+from threading import BoundedSemaphore as BMS29Semaphore
+from typing import Literal as BMS29Literal
+from .unified_report import run_public_report as bms29_public_report
+from .claim_locator import run_claim_check as bms29_claim_check
+
+_BMS29_PUBLIC_SLOTS = BMS29Semaphore(3)
+
+class UnifiedReportRequest(OpenModel):
+    model_config = OpenConfig(extra='forbid')
+    question: str = OpenField(min_length=2, max_length=500)
+    limit: int = OpenField(default=5, ge=1, le=5)
+    source: BMS29Literal['auto','live','corpus'] = 'auto'
+
+class StatementLocatorRequest(OpenModel):
+    model_config = OpenConfig(extra='forbid')
+    statement: str = OpenField(min_length=2, max_length=500)
+    limit: int = OpenField(default=5, ge=1, le=5)
+    pmid: str | None = OpenField(default=None, pattern=r'^\d{1,10}$')
+
+@app.post('/api/report/search')
+def bms29_report_endpoint(body: UnifiedReportRequest):
+    if not _BMS29_PUBLIC_SLOTS.acquire(blocking=False):
+        raise HTTPException(status_code=429, detail='Research is busy; retry shortly')
+    try:
+        report = bms29_public_report(body.question, body.limit, body.source)
+        return JSONResponse(report, headers={'Cache-Control':'no-store'})
+    except BMS25ResearchBusy:
+        raise HTTPException(status_code=429, detail='Research concurrency limit reached') from None
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    except Exception:
+        raise HTTPException(status_code=503, detail='Source retrieval temporarily unavailable') from None
+    finally:
+        _BMS29_PUBLIC_SLOTS.release()
+
+@app.post('/api/ai/claims/jobs', status_code=202)
+def bms29_start_claim(body: StatementLocatorRequest,
+                      ai_access: str | None = Header(default=None,alias='X-BMS-AI-Token')):
+    if not bms25_authorized(ai_access):
+        raise HTTPException(status_code=403, detail='Administrator token required')
+    if not bms25_model_ready():
+        raise HTTPException(status_code=503,detail='Local DeepSeek unavailable')
+    try:
+        worker = bms29_partial(bms29_claim_check,pmid=body.pmid)
+        job_id = bms25_start_job(body.statement, body.limit, worker)
+    except BMS25Busy:
+        raise HTTPException(status_code=429,detail='Another private AI job is active') from None
+    except BMS25Limit:
+        raise HTTPException(status_code=429,detail='Hourly local AI quota reached') from None
+    return {'job_id':job_id,'status':'running',
+            'note':'DeepSeek-assisted passage selection. PDF pages verified only from actual PDF text.'}
+
+@app.get('/api/ai/claims/jobs/{job_id}')
+def bms29_poll_claim(job_id: str,
+                     ai_access: str | None = Header(default=None,alias='X-BMS-AI-Token')):
+    if not bms25_authorized(ai_access):
+        raise HTTPException(status_code=403,detail='Administrator token required')
+    if not 1<=len(job_id)<=64:
+        raise HTTPException(status_code=404,detail='Job not found')
+    val=bms25_get_job(job_id)
+    if val is None:
+        raise HTTPException(status_code=404,detail='Job not found or expired')
+    return JSONResponse(val,headers={'Cache-Control':'no-store'})
