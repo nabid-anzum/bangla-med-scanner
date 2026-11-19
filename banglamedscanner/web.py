@@ -119,6 +119,9 @@ def research_endpoint(body: ResearchRequest):
 # Batch 16: sourced evidence pipeline (development split only).
 from .evidence import analyze as run_evidence
 from .llm_report import LLMMissingConfiguration, LLMResponseError, is_configured
+from .ai_gate import authorized, start_job, get_job, JobBusy, JobLimit
+from fastapi import Header
+from fastapi.responses import JSONResponse
 
 class EvidenceRequest(BaseModel):
     question: str = Field(min_length=2, max_length=500)
@@ -127,18 +130,47 @@ class EvidenceRequest(BaseModel):
 
 @app.get('/api/ai/status')
 def ai_status():
-    return {'configured': is_configured(), 'provider': 'OpenAI-compatible external API',
-            'clinical_validation': False}
+    return {'configured': is_configured(), 'provider': 'Self-hosted DeepSeek 1.5B on localhost',
+            'admin_only': True, 'clinical_validation': False}
 
 @app.post('/api/evidence')
 def evidence_endpoint(body: EvidenceRequest):
+    if body.ai_summary:
+        raise HTTPException(status_code=403, detail='Use authenticated /api/ai/jobs for local AI')
     try:
-        return run_evidence(body.question, limit=body.limit, ai_summary=body.ai_summary)
+        return run_evidence(body.question, limit=body.limit, ai_summary=False)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except LLMMissingConfiguration:
-        raise HTTPException(status_code=503, detail='AI Bangla summary is not configured') from None
-    except LLMResponseError:
-        raise HTTPException(status_code=502, detail='AI report unavailable or invalid') from None
     except (OSError, sqlite3.Error):
         raise HTTPException(status_code=503, detail='Research data source unavailable') from None
+
+@app.post('/api/ai/jobs', status_code=202)
+def start_ai_job(
+    body: EvidenceRequest,
+    ai_access: str | None = Header(default=None, alias='X-BMS-AI-Token'),
+):
+    if not is_configured():
+        raise HTTPException(status_code=503, detail='Local AI is not configured')
+    if not authorized(ai_access):
+        raise HTTPException(status_code=403, detail='Administrator token required')
+    try:
+        job_id = start_job(body.question, min(body.limit, 2), run_evidence)
+    except JobBusy:
+        raise HTTPException(status_code=429, detail='Another local AI job is running') from None
+    except JobLimit:
+        raise HTTPException(status_code=429, detail='Hourly local AI limit reached') from None
+    return {'job_id': job_id, 'status': 'running'}
+
+@app.get('/api/ai/jobs/{job_id}')
+def poll_ai_job(
+    job_id: str,
+    ai_access: str | None = Header(default=None, alias='X-BMS-AI-Token'),
+):
+    if not authorized(ai_access):
+        raise HTTPException(status_code=403, detail='Administrator token required')
+    if len(job_id) > 64:
+        raise HTTPException(status_code=404, detail='Job not found')
+    status = get_job(job_id)
+    if status is None:
+        raise HTTPException(status_code=404, detail='Job not found or expired')
+    return status
