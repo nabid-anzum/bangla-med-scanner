@@ -174,3 +174,27 @@ def poll_ai_job(
     if status is None:
         raise HTTPException(status_code=404, detail='Job not found or expired')
     return status
+
+# Batch 22: source-grounded candidate extraction; NEVER starts a model job.
+from pydantic import BaseModel as StructuredBaseModel, Field as StructuredField, ConfigDict as StructuredConfigDict
+from fastapi.responses import HTMLResponse as StructuredHTMLResponse
+from .structured import structured_analyze
+from .ui_structured import PAGE as STRUCTURED_PAGE
+
+class StructuredRequest(StructuredBaseModel):
+    model_config = StructuredConfigDict(extra='forbid')
+    question: str = StructuredField(min_length=2, max_length=500)
+    limit: int = StructuredField(default=3, ge=1, le=3)
+
+@app.get('/structured', response_class=StructuredHTMLResponse)
+def structured_home():
+    return StructuredHTMLResponse(STRUCTURED_PAGE, headers={'Cache-Control': 'no-store'})
+
+@app.post('/api/structured')
+def structured_endpoint(body: StructuredRequest):
+    try:
+        return structured_analyze(body.question, limit=body.limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    except (OSError, sqlite3.Error):
+        raise HTTPException(status_code=503, detail='Research corpus unavailable') from None
