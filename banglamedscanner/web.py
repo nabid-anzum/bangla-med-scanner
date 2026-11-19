@@ -198,3 +198,33 @@ def structured_endpoint(body: StructuredRequest):
         raise HTTPException(status_code=422, detail=str(exc)) from None
     except (OSError, sqlite3.Error):
         raise HTTPException(status_code=503, detail='Research corpus unavailable') from None
+
+
+# Batch 23: auditable six-stage public software-agent orchestration.
+# No public call path can start an LLM job. AI remains administrator-protected.
+from pydantic import BaseModel as WorkflowModel, Field as WorkflowField, ConfigDict as WorkflowConfig
+from fastapi.responses import HTMLResponse as WorkflowHTML, JSONResponse as WorkflowJSON
+import sqlite3 as workflow_sqlite3
+from .orchestrator import orchestrate as orchestrate_research, OrchestrationBusy, ProvenanceError
+from .ui_workflow import PAGE as WORKFLOW_PAGE
+
+class WorkflowRequest(WorkflowModel):
+    model_config = WorkflowConfig(extra='forbid')
+    question: str = WorkflowField(min_length=2, max_length=500)
+    limit: int = WorkflowField(default=3, ge=1, le=3)
+
+@app.get('/workflow', response_class=WorkflowHTML)
+def workflow_home():
+    return WorkflowHTML(WORKFLOW_PAGE, headers={'Cache-Control': 'no-store'})
+
+@app.post('/api/orchestrate')
+def workflow_endpoint(body: WorkflowRequest):
+    try:
+        result = orchestrate_research(body.question, limit=body.limit)
+        return WorkflowJSON(result, headers={'Cache-Control': 'no-store'})
+    except OrchestrationBusy:
+        raise HTTPException(status_code=429, detail='Research is busy. Try again shortly.') from None
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    except (ProvenanceError, OSError, workflow_sqlite3.Error):
+        raise HTTPException(status_code=503, detail='Verified research source unavailable') from None
