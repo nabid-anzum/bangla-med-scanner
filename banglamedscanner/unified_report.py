@@ -33,6 +33,11 @@ def run_public_report(question: str, limit: int = 5, source: str = 'auto',
         found['source'] = 'corpus'
         found['model_used'] = False
         found['report_mode'] = 'research'
+        originals = [p for p in found.get('papers', []) if isinstance(p,dict)]
+        tasks = [{'pmid':str(p.get('pmid','')), 'title':str(p.get('title_en',''))[:135],
+                  'action':'Inspect development paper', 'outcome':'Indexed local paper used'} for p in originals[:5]]
+        for step in found.get('agent_trace', []):
+            step['jobs'] = list(tasks) if tasks else [{'action':'Check development corpus','outcome':'No paper returned'}]
         return found
 
     start = time.monotonic()
@@ -84,6 +89,19 @@ def run_public_report(question: str, limit: int = 5, source: str = 'auto',
         {'agent':'Source Verification', 'method':'PMID and literal abstract-quote checks', 'status':'completed', 'model_invoked':False, 'elapsed_ms':0},
         {'agent':'Report Assembly', 'method':'Deterministic source-linked report; no LLM', 'status':'completed', 'model_invoked':False, 'elapsed_ms':0},
     ]
+    # Show the exact work performed by public software stages, not AI calls.
+    trace[0]['jobs']=[{'action':'Interpret question','outcome':str(parsed['english_search_query'])[:160]}]
+    trace[1]['jobs']=[{'pmid':p['pmid'],'title':str(p.get('title_en',''))[:135],
+                       'action':'Fetch PubMed metadata','outcome':'PMID and bibliographic record'} for p in papers]
+    trace[2]['jobs']=[{'pmid':p['pmid'],'title':str(p.get('title_en',''))[:135],
+                       'action':'Retrieve abstract','outcome':str(p.get('evidence_scope','metadata_only'))} for p in papers]
+    trace[3]['jobs']=[{'pmid':p['pmid'],'title':str(p.get('title_en',''))[:135],
+                       'action':'Screen PICO fields',
+                       'outcome':str(sum(bool(x) for x in p.get('pico',{}).values()))+' candidate fields'} for p in papers]
+    trace[4]['jobs']=[{'pmid':p['pmid'],'title':str(p.get('title_en',''))[:135],
+                       'action':'Verify excerpt provenance',
+                       'outcome':str(len(p.get('evidence',[])))+' exact abstract quotes'} for p in papers]
+    trace[5]['jobs']=[{'action':'Assemble research report','outcome':str(len(papers))+' papers; '+str(source_count)+' abstracts'}]
     return {
         'question_bn':question, 'source':'live', 'report_mode':'research',
         'topic':parsed['topic'], 'english_search_query':parsed['english_search_query'],

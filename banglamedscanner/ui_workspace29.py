@@ -185,6 +185,18 @@ footer a{color:#5a7a68}
 .page-number{font-weight:760;color:#315a49}
 .pill-muted{font-size:10px;color:#6a8272;border:1px solid #e0e8e0;border-radius:50px;padding:4px 8px}
 @media(max-width:640px){.mode-switch{grid-template-columns:1fr}#admin-token,#paper-pmid{max-width:100%}}
+
+/* Batch 30: per-paper trace details in the existing minimalist workspace */
+.trace-grid.audit-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+.audit-agent{min-width:0}
+.audit-tasks{margin-top:13px;border-top:1px solid var(--line);padding-top:10px}
+.audit-tasks summary{font-size:12px;font-weight:720;color:#285643;cursor:pointer;line-height:1.5}
+.audit-task-list{display:grid;gap:8px;margin-top:12px}
+.audit-task{border-left:3px solid #b8d6bd;padding:8px 10px;background:#f5f8f5;border-radius:0 6px 6px 0}
+.audit-task strong{font-size:11px;margin-bottom:3px;display:block}
+.audit-task p,.audit-source,.audit-empty{font-size:11px;line-height:1.5;color:var(--muted);overflow-wrap:anywhere}
+.audit-source{display:block;margin:4px 0}
+@media(max-width:780px){.trace-grid.audit-grid{grid-template-columns:1fr}}
 </style>
 </head>
 <body data-bms-unified="v1" data-bms-layout="v29">
@@ -371,13 +383,14 @@ footer a{color:#5a7a68}
   }
   function matchCard(parent,p,idx){
     const card=add(parent,'article',undefined,'paper');paperHeader(card,p,idx);
-    add(card,'span',p.match_type==='exact_statement'?'Exact statement found':'Related discussion · review context','match-kind');
+    add(card,'span',p.statement_explicitly_present?'Exact statement present in source':'Related discussion · claim not confirmed','match-kind');
+    if(p.discussion_assessment)add(card,'p',String(p.discussion_assessment),'note');
     add(card,'p','Location: '+String(p.page_label||'Page number unavailable')+' · '+String(p.section||'Section unavailable'),'meta-line page-number');
     const q=add(card,'blockquote',p.quote_en||'No excerpt','claim-excerpt');q.setAttribute('lang','en');
     const links=add(card,'p',undefined,'meta-line');
     if(p.full_text_url)sourceLink(links,p.full_text_url,'Read full text (PMC)');
     if(p.pdf_url&&Number.isInteger(p.page_number)&&p.page_number>=1){if(links.childNodes.length)add(links,'span','  ·  ');sourceLink(links,p.pdf_url+'#page='+p.page_number,'Open verified PDF viewer page','pdf');}
-    add(card,'p','This is a passage match, not independent confirmation that the statement is true.','note');
+    add(card,'p',String(p.page_verification_status||'Page not checked')+' · Source passage exists; medical truth is not established.','note');
   }
   function papersView(p,data){
     add(p,'h3',data.report_mode==='claim'?'Matching research papers':'Research papers & citations','pane-title');
@@ -418,20 +431,39 @@ footer a{color:#5a7a68}
     notice(p,'An exact excerpt confirms what is written in an abstract, not whether the medical statement is correct.');
   }
   function traceView(p,data){
-    add(p,'h3','Execution workflow','pane-title');
-    add(p,'p',data.model_used?'AI agents are marked only when they actually invoked DeepSeek. Retrieving sources and verifying passages are software steps.':'Software-only research workflow: no DeepSeek model was invoked.','subtle');
+    add(p,'h3','Agent execution · step by step','pane-title');
+    add(p,'p',data.model_used?'The workflow lists real DeepSeek calls and every source check. Open a stage to see which papers were used or rejected.':'Public search uses software-only retrieval, evidence screening and verification.','subtle');
     const traces=Array.isArray(data.agent_trace)?data.agent_trace:[];
-    if(!traces.length){add(p,'p','No execution record available.','subtle');return;}
-    const grid=add(p,'div',undefined,'trace-grid');
+    if(!traces.length){notice(p,'No execution record available.');return;}
+    const totals=add(p,'div',undefined,'source-note');
+    add(totals,'strong','Execution summary');
+    add(totals,'p',String(data.model_invocations||0)+' DeepSeek HTTP request(s) · '+String(data.paper_count||0)+' reported paper(s) · '+String(traces.length)+' stages');
+    if(data.relevance_audit){const a=data.relevance_audit;
+      add(totals,'p','PubMed candidates inspected: '+String(a.candidates_examined||0)+' · Accepted: '+String(a.accepted_candidates||0)+' · Rejected: '+String(a.rejected_candidates||0));
+    }
+    const grid=add(p,'div',undefined,'trace-grid');grid.classList.add('audit-grid');
     traces.forEach((stage,idx)=>{
-      const box=add(grid,'article',undefined,'agent');add(box,'div',String(idx+1).padStart(2,'0'),'agent-number');
+      const box=add(grid,'article',undefined,'agent audit-agent');
+      add(box,'div',String(idx+1).padStart(2,'0'),'agent-number');
       add(box,'strong',String(stage.agent||'Processing stage'));
       add(box,'p',String(stage.method||''));
       const foot=add(box,'div',undefined,'agent-foot');
-      add(foot,'span',stage.model_invoked?'DeepSeek · '+String(stage.model_attempts||1)+' request(s)':'Software only');
+      add(foot,'span',stage.model_invoked?'DeepSeek: '+String(stage.model_attempts||1)+' request(s)':'Software only');
       add(foot,'span',String(stage.elapsed_ms||0)+' ms');
+      const jobs=Array.isArray(stage.jobs)?stage.jobs:[];
+      if(jobs.length){
+        const detail=add(box,'details',undefined,'audit-tasks');
+        const summary=add(detail,'summary',jobs.length+' recorded task(s) · view details');
+        const list=add(detail,'div',undefined,'audit-task-list');
+        jobs.slice(0,10).forEach(job=>{
+          const item=add(list,'div',undefined,'audit-task');
+          add(item,'strong',String(job.action||'Processing task'));
+          if(job.pmid) add(item,'span','PMID '+String(job.pmid)+(job.title?' · '+String(job.title):''),'audit-source');
+          add(item,'p',String(job.outcome||'Completed'));
+        });
+      }else add(box,'p','No individual-paper task recorded for this stage.','audit-empty');
     });
-    add(p,'p','Actual model HTTP requests: '+String(data.model_invocations||0)+' · Held-out evaluation papers: '+String(data.heldout_exposure||0),'note');
+    notice(p,'A PMID, excerpt or PDF page can be mechanically checked. Medical correctness and DeepSeek semantic judgments still require expert review.');
   }
   function overviewView(p,data){
     add(p,'h3',data.report_mode==='claim'?'Statement search overview':'Research overview','pane-title');

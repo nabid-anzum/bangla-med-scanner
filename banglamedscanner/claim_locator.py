@@ -390,11 +390,17 @@ def run_claim_check(statement, limit=5, ai_summary=True, *, pmid=None,
         snippets.sort(key=lambda x:(-x['score'],-x['overlap']))
         return snippets[:MAX_CONTENT_CANDIDATES]
     snippets=phase('Accessible Full-Text Screening','Official PMC XML where available, otherwise abstracts',get_passages)
-    matches=phase('AI Evidence Comparison','DeepSeek selects relevant passage identifiers, not page numbers',
-                  lambda:_model_evidence_match(statement,query,snippets,model_call=model),True) if snippets else []
+    if snippets:
+        matches=phase('AI Evidence Comparison','DeepSeek selects relevant passage identifiers, not page numbers',
+                      lambda:_model_evidence_match(statement,query,snippets,model_call=model),True)
+    else:
+        matches=[]
+        trace.append({'agent':'AI Evidence Comparison','method':'Skipped: no candidate source excerpts',
+                      'status':'skipped','model_invoked':False,'model_attempts':0,'elapsed_ms':0})
     by_id={s['id']:s for s in snippets}
     by_pmid={p['pmid']:p for p in ordered}
-    lookup=pdf_page_lookup or _locate_pdf_page
+    from .pdf_evidence import locate_verified_pdf_page
+    lookup=pdf_page_lookup or locate_verified_pdf_page
     def verify():
         chosen={}
         # Extra exact-match detection avoids missing a literal quote because
@@ -413,9 +419,9 @@ def run_claim_check(statement, limit=5, ai_summary=True, *, pmid=None,
             if str(m.get('relation','')) not in ('direct','related','contradicts'):
                 continue
             # Require an objective overlap with the interpreted English query.
-            if s['overlap']<1 or s['score']<0.095:
+            if s['overlap'] < min(2, len(_terms(query))):
                 continue
-            chosen.setdefault(sid,'related')
+            chosen.setdefault(sid,str(m.get('relation','related')))
         result=[]; seen=set()
         for s in sorted(snippets,key=lambda x:-x['score']):
             if s['id'] not in chosen or s['pmid'] in seen:
@@ -439,6 +445,15 @@ def run_claim_check(statement, limit=5, ai_summary=True, *, pmid=None,
                 'section':s['section'], 'evidence_scope':s['scope'],
                 'quote_en':_safe_excerpt(s['quote_en'],24),
                 'match_type':'exact_statement' if chosen[s['id']]=='exact' else 'related_discussion',
+                'statement_explicitly_present':chosen[s['id']]=='exact',
+                'discussion_assessment':{
+                    'exact':'Verbatim source statement found',
+                    'direct':'Direct discussion suggested by DeepSeek; review quotation',
+                    'related':'Related topic only; statement not confirmed',
+                    'contradicts':'Possible contradiction; manually verify the context',
+                }.get(chosen[s['id']], 'Relevance not established'),
+                'model_relation':chosen[s['id']] if chosen[s['id']]!='exact' else None,
+                'page_verification_status':'verified_extracted_pdf_page' if page is not None else ('pdf_accessible_but_passage_not_verified' if pdf_link else 'licensed_pdf_unavailable'),
                 'medical_truth_verified':False,
             })
             seen.add(s['pmid'])
@@ -448,6 +463,24 @@ def run_claim_check(statement, limit=5, ai_summary=True, *, pmid=None,
     results=phase('Citation and Page Verification',
                   'Verifies original passage and PDF page text; no invented page numbers', verify)
     phase('Report Assembly','At most five source-linked papers; no medical truth claim',lambda:len(results))
+    # Explain exactly what each stage processed. Never show model reasoning.
+    trace[0]['jobs']=[{'action':'Plan statement search','outcome':'English query: '+query[:170]}]
+    trace[1]['jobs']=[{'pmid':p['pmid'],'title':p['title_en'][:140],
+                      'action':'Read PubMed record','outcome':'Abstract '+('available' if p.get('abstract') else 'unavailable')}
+                     for p in ordered[:5]]
+    trace[2]['jobs']=[{'pmid':p['pmid'],'title':p['title_en'][:140],
+                      'action':'Screen accessible text',
+                      'outcome':str(len(p.get('fulltext_segments',[])))+' full-text segments; '+
+                                str(sum(s['pmid']==p['pmid'] for s in snippets))+' candidate excerpts'}
+                     for p in ordered[:5]]
+    trace[3]['jobs']=[{'pmid':m.get('pmid',''),'action':'Compare excerpt '+str(m.get('id','')),
+                      'outcome':'DeepSeek relationship: '+str(m.get('relation','unclear'))}
+                     for m in matches[:10] if isinstance(m,dict)]
+    trace[4]['jobs']=[{'pmid':p['pmid'],'title':p['title_en'][:140],
+                      'action':'Verify original source and PDF',
+                      'outcome':p['page_label']+'; '+p['discussion_assessment']}
+                     for p in results[:5]]
+    trace[5]['jobs']=[{'action':'Assemble sourced report','outcome':str(len(results))+' matched papers (maximum five)'}]
     total=_MODEL_ATTEMPTS.get() if model_call is None else sum(s['model_attempts'] for s in trace)
     return {
         'report_mode':'claim', 'question_bn':statement,'english_search_query':query,

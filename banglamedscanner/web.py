@@ -235,7 +235,7 @@ from fastapi import Header, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel as OpenModel, Field as OpenField, ConfigDict as OpenConfig
 from .open_topics import public_live_search, plan_public
-from .ai_orchestration import run_ai_research
+from .reliable_research import run_reliable_ai_research as run_ai_research
 from .ai_gate import authorized as bms25_authorized, start_job as bms25_start_job
 from .ai_gate import get_job as bms25_get_job, JobBusy as BMS25Busy, JobLimit as BMS25Limit
 from .llm_report import is_configured as bms25_model_ready
